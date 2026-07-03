@@ -1,6 +1,14 @@
 use anyhow::{Result, bail};
-use std::fs::File;
-use std::io::prelude::*;
+use crate::btree::BTree;
+use crate::pager::Pager;
+
+#[macro_use]
+mod utils;
+mod exceptions;
+mod parser;
+mod pager;
+mod btree;
+
 
 fn main() -> Result<()> {
     // Parse arguments
@@ -11,23 +19,29 @@ fn main() -> Result<()> {
         _ => {}
     }
 
+    // Init pager and btree
+    let pager = Pager::new(&args[1]);
+    let mut btree = BTree::new(pager);
+    let _ = btree.parse_meta();
+
     // Parse command and act accordingly
     let command = &args[2];
     match command.as_str() {
         ".dbinfo" => {
-            let mut file = File::open(&args[1])?;
-            let mut header = [0; 100];
-            file.read_exact(&mut header)?;
-
-            // The page size is stored at the 16th byte offset, using 2 bytes in big-endian order
-            #[allow(unused_variables)]
-            let page_size = u16::from_be_bytes([header[16], header[17]]);
-
             // You can use print statements as follows for debugging, they'll be visible when running tests.
             eprintln!("Logs from your program will appear here!");
 
             // TODO: Uncomment the code below to pass the first stage
-            // println!("database page size: {}", page_size);
+            println!("database page size: {}", btree.pager.page_size());
+            println!("number of tables: {}", btree.tables.len());
+        },
+        ".tables" => {
+            let mut table_names: Vec<&str> = Vec::new();
+            for t in btree.tables.values() {
+                table_names.push(t.name())
+            };
+            let names = table_names.join(" ");
+            println!("{}", &names);
         }
         _ => bail!("Missing or invalid command passed: {}", command),
     }
