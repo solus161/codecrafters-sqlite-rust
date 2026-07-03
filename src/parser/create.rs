@@ -278,7 +278,6 @@ impl Build for CreateIndexStmt {
                 return Err(tokens.get_syntax_error())
             };
 
-            println!("Token {:?}", &token);
             if !token.is_token_type_matched(&target_tokens) {
                 return Err(tokens.get_syntax_error())
             };

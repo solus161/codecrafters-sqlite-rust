@@ -38,8 +38,9 @@ fn main() -> Result<()> {
         ".tables" => {
             let mut table_names: Vec<&str> = Vec::new();
             for t in btree.tables.values() {
-                table_names.push(t.name())
+                table_names.push(t.name());
             };
+            table_names.sort();
             let names = table_names.join(" ");
             println!("{}", &names);
         }
