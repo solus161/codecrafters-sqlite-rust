@@ -34,7 +34,7 @@ pub fn process(btree: &mut BTree, s: &str) -> Result<String, CustomErr> {
             // From clause first
             let table_name = stmt.from_clause.table_name()
                 .ok_or(CustomErr::ValidateAST("Table name not found".to_string()))?;
-
+            
             let table = btree.get_table(&table_name)
                 .ok_or(CustomErr::Execution("Table not found".to_string()))?;
 

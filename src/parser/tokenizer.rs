@@ -31,6 +31,7 @@ const KW_IN: &str = "IN";
 const KW_LIKE: &str = "LIKE";
 const KW_ILIKE: &str = "ILIKE";
 const KW_BETWEEN: &str = "BETWEEN";
+const KW_NULL: &str = "NULL";
 
 #[derive(Debug, PartialEq)]
 pub struct Tokens<'a> {
@@ -90,7 +91,7 @@ impl<'a> Tokens<'a> {
                 Token::Asterik { start } | Token::Where { start } |
                 Token::Integer { start } | Token::Text { start } |
                 Token::AutoIncrement { start } | Token::PrimaryKey { start } |
-                Token::Semicolon { start } | Token::Not { start } |
+                Token::Semicolon { start } | Token::Not { start } | Token::Null { start } |
                 Token::Like { start } | Token::Ilike { start } |
                 Token::Between { start } | Token::Float { start } |
                 Token::EoF { start } => {
@@ -152,6 +153,7 @@ pub enum Token<'a> {
     Like{ start: usize },
     Ilike{ start: usize },
     Between{ start: usize },
+    Null{ start: usize }
 }
 
 impl<'a> Eq for Token<'a> {}
@@ -355,6 +357,7 @@ pub fn tokenize<'a>(s: &'a str) -> Result<Tokens<'a>, CustomErr> {
                     KW_LIKE => Token::Like{ start: i },
                     KW_ILIKE => Token::Ilike{ start: i },
                     KW_BETWEEN => Token::Between{ start: i },
+                    KW_NULL => Token::Null { start: i },
                     _ => {
                         
                         Token::Ident{ start: i, value: &s[i..i + next_delimiter]}

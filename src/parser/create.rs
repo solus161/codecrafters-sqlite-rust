@@ -115,6 +115,7 @@ impl Build for ColumnClause {
                         Token::Float { start: 0 },
                         Token::PrimaryKey { start: 0 },
                         Token::AutoIncrement { start: 0 },
+                        Token::Not { start: 0 },
                         Token::Comma { start: 0 }
                     ])
                 },
@@ -126,6 +127,7 @@ impl Build for ColumnClause {
                     target_tokens = Some(vec![
                         Token::PrimaryKey { start: 0 },
                         Token::AutoIncrement { start: 0 },
+                        Token::Not { start: 0 },
                         Token::Comma { start: 0 }
                     ])
                 },
@@ -137,6 +139,7 @@ impl Build for ColumnClause {
                     col_top.set_pk(true);
                     target_tokens = Some(vec![
                         Token::AutoIncrement { start: 0 },
+                        Token::Not { start: 0 },
                         Token::Comma { start: 0 }
                     ])
                 },
@@ -147,6 +150,26 @@ impl Build for ColumnClause {
 
                     col_top.set_default(DefaultExpr::AutoIncrement);
                     target_tokens = Some(vec![
+                        Token::Comma { start: 0 }
+                    ])
+                },
+                Token::Not { .. } => {
+                    // NOT must be immediately followed by NULL to form NOT NULL
+                    let Some(null_token) = tokens.current() else {
+                        return Err(tokens.get_syntax_error())
+                    };
+                    if !matches!(null_token, Token::Null { .. }) {
+                        return Err(tokens.get_syntax_error())
+                    };
+
+                    let Some(col_top) = columns.last_mut() else {
+                        return Err(tokens.get_syntax_error())
+                    };
+
+                    col_top.set_not_null(true);
+                    target_tokens = Some(vec![
+                        Token::PrimaryKey { start: 0 },
+                        Token::AutoIncrement { start: 0 },
                         Token::Comma { start: 0 }
                     ])
                 },
@@ -175,6 +198,7 @@ pub struct ColumnAttr {
     name: String,
     column_type: Option<ColumnType>,
     pk: bool,
+    not_null: bool,
     default: Option<DefaultExpr>
 }
 
@@ -186,6 +210,7 @@ impl ColumnAttr {
             name: name,
             column_type: None,
             pk: false,
+            not_null: false,
             default: None
         }
     }
@@ -210,6 +235,14 @@ impl ColumnAttr {
 
     pub fn set_pk(&mut self, pk: bool) {
         self.pk = pk
+    }
+
+    pub fn not_null(&self) -> bool {
+        self.not_null
+    }
+
+    pub fn set_not_null(&mut self, not_null: bool) {
+        self.not_null = not_null
     }
 
     pub fn set_default(&mut self, default: DefaultExpr) {
