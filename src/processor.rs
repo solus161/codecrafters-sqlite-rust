@@ -77,8 +77,9 @@ pub fn process(btree: &mut BTree, s: &str) -> Result<String, CustomErr> {
             };
 
             // Got the rows, how choose what to return
-            let output = extract_columns(btree, payloads, &stmt);
-            Ok(output.join("\r\n"))
+            let mut output = extract_columns(btree, payloads, &stmt);
+            output.sort();
+            Ok(output.join("\n"))
         },
         _ => return Err(CustomErr::ValidateAST("AST not supported".to_string()))
     }
