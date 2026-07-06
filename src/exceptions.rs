@@ -11,7 +11,9 @@ pub enum CustomErr {
     Internal,
     ReadPage(String),
     ParsePage(String),
+    BuildAST(String),
     ValidateAST(String),
+    Execution(String),
 }
 
 

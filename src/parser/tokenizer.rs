@@ -74,7 +74,7 @@ impl<'a> Tokens<'a> {
     #[track_caller]
     pub fn get_syntax_error(&self) -> CustomErr {
         let Some(current_token) = self.peek(0) else {
-            return CustomErr::Internal
+            return CustomErr::Tokenize("Token at position 0 not found".to_string());
         };
 
         let start = match current_token {
@@ -82,9 +82,9 @@ impl<'a> Tokens<'a> {
                 Token::Table { start } | Token::Index { start } |
                 Token::From { start } | Token::On { start } |
                 Token::In { start } | Token::Comma { start } |
-                Token::Eq { start } | Token::Neq { start } |
+                Token::Eq { start } | Token::Ne { start } |
                 Token::Gt { start } | Token::Lt { start } |
-                Token::Gte { start } | Token::Lte { start } |
+                Token::Ge { start } | Token::Le { start } |
                 Token::And { start } | Token::Or { start } |
                 Token::Count { start } | Token::Lparen { start } | Token::Rparen { start } |
                 Token::Asterik { start } | Token::Where { start } |
@@ -125,11 +125,11 @@ pub enum Token<'a> {
     Rparen{ start: usize },
     Where{ start: usize },
     Eq{ start: usize },
+    Ne{ start: usize},
     Gt{ start: usize },
     Lt{ start: usize },
-    Gte{ start: usize },
-    Lte{ start: usize },
-    Neq{ start: usize },
+    Ge{ start: usize },
+    Le{ start: usize },
     Ident{ start: usize, value: &'a str },
     StrLiteral{ start: usize, value: &'a str },
     IntLiteral{ start: usize, value: i64 },
@@ -238,7 +238,7 @@ pub fn tokenize<'a>(s: &'a str) -> Result<Tokens<'a>, CustomErr> {
                     return Err(get_tokenize_err(&s[..i+1]))};
 
                 if *c == '=' {
-                    output.push(Token::Neq{ start: i });
+                    output.push(Token::Ne{ start: i });
                     i += 2;
                 } else {
                     return Err(get_tokenize_err(&s[..i+1]))
@@ -253,7 +253,7 @@ pub fn tokenize<'a>(s: &'a str) -> Result<Tokens<'a>, CustomErr> {
 
                 if *c == '=' {
                     i += 2;
-                    output.push(Token::Gte{ start: i });
+                    output.push(Token::Ge{ start: i });
                 } else {
                     i += 1;
                     output.push(Token::Gt{ start: i });
@@ -268,7 +268,7 @@ pub fn tokenize<'a>(s: &'a str) -> Result<Tokens<'a>, CustomErr> {
 
                 if *c == '=' {
                     i += 2;
-                    output.push(Token::Lte{ start: i });
+                    output.push(Token::Le{ start: i });
                 } else {
                     i += 1;
                     output.push(Token::Lt{ start: i });
@@ -442,7 +442,7 @@ mod tests {
             Token::Asterik{ start: 31 }, Token::Rparen{ start: 32 },
             Token::From{ start: 33 }, Token::Ident{ start: 38, value: "companies" },
             Token::Where{ start: 48 },
-            Token::Ident{ start: 54, value: "status" }, Token::Gte{ start: 63 },
+            Token::Ident{ start: 54, value: "status" }, Token::Ge{ start: 63 },
             Token::IntLiteral{ start: 65, value: 1 },
             Token::And{ start: 66 }, Token::Or{ start: 70 },
             Token::Ident{ start: 74, value: "country" }, Token::Eq{ start: 82 },

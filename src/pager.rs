@@ -38,7 +38,7 @@ impl Pager {
         self.page_count
     }
 
-    pub fn read_page(&self, page_number: u64) -> Result<Vec<u8>, CustomErr> {
+    pub fn read_page(&self, page_number: &u64) -> Result<Vec<u8>, CustomErr> {
         let offset = (page_number - 1) as u64 * self.page_size as u64;
         let mut buf = vec![0u8; self.page_size as usize];
         self.file.read_exact_at(&mut buf, offset)?;

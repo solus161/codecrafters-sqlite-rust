@@ -1,6 +1,10 @@
 use std::collections::{ HashMap, HashSet };
 use std::rc::Rc;
+use std::u64;
 
+use bytes::Bytes;
+
+use crate::parser::select::ValueExpr;
 use crate::parser::{ Ast, ast_from_str };
 use crate::exceptions::CustomErr;
 use crate::pager::Pager;
@@ -16,12 +20,16 @@ impl BTree {
         Self { tables: HashMap::new(), pager }
     }
 
-    pub fn parse_page(&mut self, page_no: u64) -> Result<Page, CustomErr> {
+    pub fn get_table(&self, table_name: &str) -> Option<&Table> {
+        self.tables.get(table_name) 
+    }
+
+    pub fn parse_page(&mut self, page_no: &u64) -> Result<Page, CustomErr> {
         let buf = self.pager.read_page(page_no)?;
-        let mut builder = PageBuilder::new(page_no);
+        let mut builder = PageBuilder::new(*page_no);
 
         // First page, skip first 100 bytes
-        let mut offset: usize = if page_no == 1 { 100 } else { 0 };
+        let mut offset: usize = if *page_no == 1 { 100 } else { 0 };
         
         // Parse the first page
         
@@ -54,7 +62,8 @@ impl BTree {
             _ => {}
         };
 
-        // Cells offset
+        // Cells offset, in increasing key order
+        // physical position of cell does not matter
         for _ in 0..cell_count {
             let cell_offset = u16::from_be_bytes(get_offset(&buf, offset, 2).try_into()?) as u64;
             let cell = Cell::new(&page_type, &buf[cell_offset as usize..], &mut self.pager)?;
@@ -73,7 +82,7 @@ impl BTree {
     }
 
     pub fn parse_meta(&mut self) -> Result<(), CustomErr> {
-        let page_01 = self.parse_page(1)?;
+        let page_01 = self.parse_page(&1)?;
 
         let mut builders_tbl: HashMap<String, TableBuilder> = HashMap::new();
         let mut builders_idx: Vec<IndexBuilder> = Vec::new(); 
@@ -90,19 +99,19 @@ impl BTree {
             let msg_type = "Wrong column type";
 
             // Type
-            let type_col = payload.get_column(0)
+            let type_col = payload.column(0)
                 .ok_or(CustomErr::ValidateAST(msg_col_index.to_string()))?;
             let type_value = type_col.as_str()
                 .ok_or(CustomErr::ValidateAST(msg_type.to_string()))?;
             // Page ptr
 
-            let ptr_col = payload.get_column(3)
+            let ptr_col = payload.column(3)
                 .ok_or(CustomErr::ValidateAST(msg_col_index.to_string()))?;
             let ptr_value = ptr_col.as_int()
                 .ok_or(CustomErr::ValidateAST(msg_type.to_string()))?;
 
             // Sql
-            let sql_col = payload.get_column(4)
+            let sql_col = payload.column(4)
                 .ok_or(CustomErr::ValidateAST(msg_col_index.to_string()))?;
             let sql_value = sql_col.as_str().ok_or(CustomErr::ValidateAST(msg_type.to_string()))?;
 
@@ -210,12 +219,13 @@ impl Cell {
                 offset += row_id_bytes;
 
                 // There could be overflow page
-                let payload: CellPayload = if offset + payload_length as usize > buf.len() {
+                let mut payload: CellPayload = if offset + payload_length as usize > buf.len() {
                     let payload_buf = Self::get_overflow_payload(pager, &buf[offset..], payload_length)?;
                     CellPayload::try_from(&payload_buf[..])?
                 } else {
                     CellPayload::try_from(&buf[offset..])?
                 };
+                payload.add_row_id(row_id);
                 Ok(Self::TblLeaf { payload_length, row_id, payload })
             },
             PageType::IdxLeaf => {
@@ -237,12 +247,12 @@ impl Cell {
 
     fn get_overflow_payload(pager: &mut Pager, buf: &[u8], payload_length: u64) -> Result<Vec<u8>, CustomErr> {
         let overflow_ptr = u32::from_be_bytes(*buf.last_chunk::<4>()
-            .ok_or(CustomErr::Internal)?) as u64;
+            .ok_or(CustomErr::Execution("Corrupted page: overflow payload".to_string()))?) as u64;
         let mut payload_bytes: Vec<u8> = Vec::from(&buf[..buf.len()-4]);
         let mut next_pointer: u64;
 
         loop {
-            let next_buf = pager.read_page(overflow_ptr)?;
+            let next_buf = pager.read_page(&overflow_ptr)?;
             next_pointer = i32::from_be_bytes(next_buf[..4].try_into()?) as u64;
             payload_bytes.extend_from_slice(&next_buf[4..]);
             if next_pointer == 0 { break };
@@ -251,7 +261,54 @@ impl Cell {
         Ok(Vec::from(payload_bytes))
     }
 
-    fn payload(&self) -> Option<&CellPayload> {
+    pub fn left_ptr(&self) -> Option<u64> {
+        match self {
+            Self::IdxInterior { left_child_ptr, .. } | Self::TblInterior { left_child_ptr, .. } => {
+                Some(*left_child_ptr)
+            },
+            _ => None
+        }
+    }
+
+    pub fn indexed_value(&self) -> Option<ValueExpr> {
+        match self {
+            Self::IdxInterior { payload, .. } | Self::IdxLeaf { payload, .. } => {
+                let col_value = payload.column(0).expect("Must be indexed value");
+                ValueExpr::try_from(col_value).ok()
+            },
+            _ => None
+        }
+    }
+
+    pub fn row_id(&self) -> Option<u64> {
+        match self {
+            Self::TblInterior { row_id, .. } | Self::TblLeaf { row_id, .. } => {
+                Some(*row_id)
+            },
+            Self::IdxInterior { payload, .. } | Self::IdxLeaf { payload, .. } => {
+                let cell_value =  payload.column(1).expect("Must be row_id");
+                let row_id = cell_value.as_int().expect("Must be row_id") as u64;
+                Some(row_id)
+            }
+        }
+    }
+
+    pub fn unpack_index(&self) -> Result<(u64, ValueExpr, u64), CustomErr> {
+        let left_ptr = self.left_ptr();
+        let indexed_value = self.indexed_value();
+        let row_id = self.row_id();
+        if left_ptr.is_some() && indexed_value.is_some() && row_id.is_some() {
+            Ok((
+                left_ptr.ok_or(CustomErr::Execution("Must be left_ptr".to_string()))?,
+                indexed_value.ok_or(CustomErr::Execution("Must be indexed value".to_string()))?,
+                row_id.ok_or(CustomErr::Execution("Must be row id".to_string()))?
+            ))
+        } else {
+            Err(CustomErr::Execution("Corruped index".to_string())) 
+        }
+    }
+
+    pub fn payload(&self) -> Option<&CellPayload> {
         match self {
             Self::IdxInterior { payload, .. } |
                 Self::IdxLeaf { payload, .. } | Self::TblLeaf { payload, .. } => {
@@ -262,14 +319,27 @@ impl Cell {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct CellPayload {
+    row_id: Option<u64>,
     columns: Vec<CellColValue>,
 }
 
 impl CellPayload {
-    pub fn get_column(&self, index: usize) -> Option<&CellColValue> {
+    pub fn column(&self, index: usize) -> Option<&CellColValue> {
         self.columns.get(index)
+    }
+
+    pub fn last(&self) -> Result<&CellColValue, CustomErr> {
+        self.columns.last().ok_or(CustomErr::Execution("Payload has not last value".to_string()))
+    }
+
+    pub fn add_row_id(&mut self, row_id: u64) {
+        self.row_id = Some(row_id)
+    }
+
+    pub fn row_id(&self) -> Option<&u64> {
+        self.row_id.as_ref()
     }
 }
 
@@ -299,7 +369,7 @@ impl TryFrom<&[u8]> for CellPayload {
             column_values.push(value);
             offset += t.content_length().unwrap_or(0);
         };
-        Ok(Self { columns: column_values })
+        Ok(Self { row_id: None, columns: column_values })
     }
 }
 
@@ -352,7 +422,7 @@ impl CellColType {
 }
 
 // Value of column within cell
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum CellColValue {
     Null,
     Int8(i8),
@@ -415,6 +485,7 @@ impl CellColValue {
             Self::Int8(x) => Some(*x as i64),
             Self::Int16(x) => Some(*x as i64),
             Self::Int24(x) => Some(*x as i64),
+            Self::Int32(x) => Some(*x as i64),
             Self::Int48(x) => Some(*x as i64),
             Self::Int64(x) => Some(*x as i64),
             _ => None
@@ -434,6 +505,21 @@ impl CellColValue {
             _ => None
         }
     }
+
+    pub fn to_string(&self) -> String {
+        match self {
+            Self::Int8(x) => x.to_string(),
+            Self::Int16(x) => x.to_string(),
+            Self::Int24(x) => x.to_string(),
+            Self::Int32(x) => x.to_string(),
+            Self::Int48(x) => x.to_string(),
+            Self::Int64(x) => x.to_string(),
+            Self::Float64(f) => f.to_string(),
+            Self::Text(s) => s.to_string(),
+            Self::Blob(_) => "".to_string(),
+            Self::Null => "".to_string(),
+        }
+    }
 }
 
 // Table, created from AST
@@ -442,6 +528,7 @@ pub struct Table {
     name: String,
     offset: u64,                    // offset bytes on page 1
     page_ptr: u64,
+    columns_ord: Vec<Rc<str>>,
     columns: HashMap<Rc<str>, u64>, // column - order 
     indexes: HashMap<Rc<str>, Index>
 }
@@ -451,15 +538,28 @@ impl Table{
         name: String,
         offset: u64,
         page_ptr: u64,
+        columns_ord: Vec<Rc<str>>,
         columns: HashMap<Rc<str>, u64>,
         indexes: HashMap<Rc<str>, Index>
     ) -> Self {
-        Self { name, offset, page_ptr, columns, indexes }
+        Self { name, offset, page_ptr, columns_ord, columns, indexes }
     }
 
     get_attr_str!(name);
     get_attr_u64!(offset);
     get_attr_u64!(page_ptr);
+
+    pub fn index(&self, column_name: &str) -> Option<&Index> {
+        self.indexes.get(&Rc::from(column_name))
+    }
+
+    pub fn column_index(&self, column_name: &str) -> Option<&u64> {
+        self.columns.get(&Rc::from(column_name))
+    }
+
+    pub fn columns_ord(&self) -> &[Rc<str>] {
+        self.columns_ord.as_ref()
+    }
 }
 
 
@@ -469,6 +569,7 @@ pub struct TableBuilder {
     name: Option<String>,
     offset: Option<u64>,
     page_ptr: Option<u64>,
+    columns_ord: Option<Vec<Rc<str>>>,
     columns: Option<HashMap<Rc<str>, u64>>,
     indexes: Option<HashMap<Rc<str>, Index>>,
 }
@@ -479,6 +580,7 @@ impl TableBuilder {
             name: None,
             offset: None,
             page_ptr: None,
+            columns_ord: None,
             columns: None,
             indexes: None
         }
@@ -501,6 +603,7 @@ impl TableBuilder {
 
     pub fn with_column(&mut self, column_name: &str, ord: u64) -> Result<&mut Self, CustomErr> {
         let column_rc: Rc<str> = Rc::from(column_name);
+        self.columns_ord.get_or_insert_default().push(column_rc.clone());
         let _ = self.columns.get_or_insert_default().insert(column_rc, ord);
         Ok(self)
     }
@@ -521,6 +624,7 @@ impl TableBuilder {
             self.name.ok_or(CustomErr::ValidateAST("Table name not provided".to_string()))?,
             self.offset.ok_or(CustomErr::ValidateAST("Cell offset not provided".to_string()))?,
             self.page_ptr.ok_or(CustomErr::ValidateAST("Page pointer not provided".to_string()))?,
+            self.columns_ord.ok_or(CustomErr::ValidateAST("Columns not provided".to_string()))?,
             self.columns.ok_or(CustomErr::ValidateAST("Columns not provided".to_string()))?, 
             self.indexes.unwrap_or_default()
             ))
@@ -586,6 +690,7 @@ pub struct Page {
     cell_area_offset: u64,
     fragmented_freebyte_count: u64,
     right_ptr: Option<u64>,
+    cells_order: Vec<u64>,
     cells: HashMap<u64, Cell>,
 }
 
@@ -602,12 +707,20 @@ impl Page {
         &self.page_type
     }
 
-    pub fn right_ptr(&self) -> &Option<u64> {
-        &self.right_ptr
+    pub fn right_ptr(&self) -> Option<&u64> {
+        self.right_ptr.as_ref()
+    }
+
+    pub fn cells_order(&self) -> &[u64] {
+        &self.cells_order
     }
 
     pub fn cells(&self) -> &HashMap<u64, Cell> {
         &self.cells
+    }
+
+    pub fn cell(&self, offset: &u64) -> Result<&Cell, CustomErr> {
+        self.cells.get(offset).ok_or(CustomErr::Execution("Invalid cell offset".to_string()))
     }
 }
 
@@ -647,6 +760,7 @@ pub struct PageBuilder {
     cell_area_offset: Option<u64>,
     fragmented_freebyte_count: Option<u64>,
     right_ptr: Option<u64>,             // only in interior page
+    cells_order: Vec<u64>,
     cells: HashMap<u64, Cell>,
 }
 
@@ -660,6 +774,7 @@ impl PageBuilder {
             cell_area_offset: None,
             fragmented_freebyte_count: None,
             right_ptr: None,
+            cells_order: Vec::new(),
             cells: HashMap::new(),
         }
     }
@@ -676,6 +791,7 @@ impl PageBuilder {
     build_attr_u64!(right_ptr);
 
     pub fn with_cell(&mut self, offset: u64, cell: Cell) -> &mut Self {
+        self.cells_order.push(offset);
         self.cells.insert(offset, cell);
         self
     }
@@ -683,12 +799,18 @@ impl PageBuilder {
     pub fn build(self) -> Result<Page, CustomErr> {
         Ok(Page {
             page_ptr: self.page_ptr,
-            page_type: self.page_type.ok_or(CustomErr::Internal)?,
-            freeblock_offset: self.freeblock_offset.ok_or(CustomErr::Internal)?,
-            cell_count: self.cell_count.ok_or(CustomErr::Internal)?,
-            cell_area_offset: self.cell_area_offset.ok_or(CustomErr::Internal)?,
-            fragmented_freebyte_count: self.fragmented_freebyte_count.ok_or(CustomErr::Internal)?,
+            page_type: self.page_type
+                .ok_or(CustomErr::ParsePage("Page type".to_string()))?,
+            freeblock_offset: self.freeblock_offset
+                .ok_or(CustomErr::ParsePage("Free block".to_string()))?,
+            cell_count: self.cell_count
+                .ok_or(CustomErr::ParsePage("Cell count".to_string()))?,
+            cell_area_offset: self.cell_area_offset
+                .ok_or(CustomErr::ParsePage("Cell area offset".to_string()))?,
+            fragmented_freebyte_count: self.fragmented_freebyte_count
+                .ok_or(CustomErr::ParsePage("Fragmented freebyte count".to_string()))?,
             right_ptr: self.right_ptr,
+            cells_order: self.cells_order,
             cells: self.cells
         })
     }
@@ -759,12 +881,12 @@ mod tests {
     fn test_parse_page_01 () {
         let pager = Pager::new("companies.db");
         let mut btree = BTree::new(pager);
-        let page_01 = btree.parse_page(1);
+        let page_01 = btree.parse_page(&1);
         println!("Page 01: {:?}", &page_01);
         assert!(page_01.is_ok());
 
         // Page 2, table companies
-        let page_2 = btree.parse_page(2);
+        let page_2 = btree.parse_page(&2);
         println!("Page 2: {:?}", &page_2);
         assert!(page_2.is_ok());
 
@@ -772,5 +894,9 @@ mod tests {
         let result = btree.parse_meta();
         println!("Parse meta result {:?}", &result);
         println!("Btree {:?}", &btree);
+
+        // Index on country
+        let page_4 = btree.parse_page(&4);
+        println!("Page 4: {:?}", &page_4);
     }
 }

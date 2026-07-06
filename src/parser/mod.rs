@@ -1,8 +1,8 @@
 pub mod tokenizer;
 pub mod create;
-mod select;
+pub mod select;
 
-use crate::{exceptions::CustomErr, parser::tokenizer::tokenize};
+use crate::{btree::CellPayload, exceptions::CustomErr, parser::tokenizer::tokenize};
 use tokenizer::{ Tokens, Token };
 use create::{ CreateTableStmt, CreateIndexStmt };
 use select::SelectStmt;
@@ -12,6 +12,26 @@ pub trait Build: Sized {
     // The AST owns its strings, so it is
     // independent of both the token slice and the original SQL source.
     fn build(tokens: &mut Tokens) -> Result<Option<Self>, CustomErr>;
+}
+
+// A general trait for all expr that could be evaluated
+pub trait Eval {
+    fn eval(&self, row: &CellPayload) -> Result<EvalOutput, CustomErr>;
+}
+
+// Output of eval
+pub enum EvalOutput {
+    Bool(bool),
+    Array,      // This is subquery, leave it for later
+}
+
+impl EvalOutput {
+    pub fn is_true(&self) -> bool {
+        match self {
+            Self::Bool(b) => *b,
+            _ => false
+        }
+    }
 }
 
 #[derive(Debug, PartialEq)]

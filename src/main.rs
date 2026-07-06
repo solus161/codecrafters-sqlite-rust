@@ -8,7 +8,9 @@ mod exceptions;
 mod parser;
 mod pager;
 mod btree;
+mod processor;
 
+use processor::process;
 
 fn main() -> Result<()> {
     // Parse arguments
@@ -44,7 +46,13 @@ fn main() -> Result<()> {
             let names = table_names.join(" ");
             println!("{}", &names);
         }
-        _ => bail!("Missing or invalid command passed: {}", command),
+        _ => {
+            let output = process(&mut btree, command.as_str());
+            match output {
+                Ok(v) => println!("{}", &v),
+                Err(e) => println!("ERR {:?}", &e)
+            }
+        }
     }
 
     Ok(())
