@@ -1,6 +1,5 @@
 use std::fs::File;
 use std::os::unix::fs::FileExt;
-use std::io::{self, Read};
 use std::fmt::Debug;
 
 use crate::exceptions::CustomErr;
@@ -21,8 +20,11 @@ impl Pager {
         let mut buf = vec![0u8; 100];
         file_obj.read_exact_at(&mut buf, offset).expect("Error reading first 100 bytes");
 
-        // 2 byte offset 16, page size
-        let page_size = u16::from_be_bytes(buf[16..16+2].try_into().unwrap()) as u64;
+        // 2 byte offset 16, page size.
+        // Per the SQLite spec this is a power of two between 512 and 32768,
+        // or the value 1 meaning a page size of 65536 (which doesn't fit in u16).
+        let raw_page_size = u16::from_be_bytes(buf[16..16+2].try_into().unwrap()) as u64;
+        let page_size = if raw_page_size == 1 { 65536 } else { raw_page_size };
         
         // Page count
         let page_count = u32::from_be_bytes(buf[16+12..16+12+4].try_into().unwrap()) as u64;

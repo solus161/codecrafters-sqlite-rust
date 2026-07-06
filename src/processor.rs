@@ -16,7 +16,6 @@ impl QueryOutput {
     pub fn new() -> Self {
         Self { rows: Vec::new() }
     }
-
 }
 
 pub fn process(btree: &mut BTree, s: &str) -> Result<String, CustomErr> {
@@ -71,9 +70,8 @@ pub fn process(btree: &mut BTree, s: &str) -> Result<String, CustomErr> {
                     idx_start_ptr,
                     tbl_start_ptr
                     )?;
-                payloads
                 // println!("Payloads {:?}", &payloads);
-                // println!("Payloads len {:?}", payloads.unwrap().len());
+                payloads
             };
 
             // Got the rows, how choose what to return
@@ -194,7 +192,6 @@ fn index_scan(
                         // Full table scan
                     }, 
                     CompSpecOp::Gt => {
-                        println!("Op GT");
                         for offset in cells_offset {
                             let cell_upper = page.cell(offset)?;
                             let (left_ptr_upper, idx_value_upper, row_id_upper) = cell_upper.unpack_index()?;

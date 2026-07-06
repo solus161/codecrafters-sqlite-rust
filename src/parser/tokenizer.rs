@@ -289,7 +289,6 @@ pub fn tokenize<'a>(s: &'a str) -> Result<Tokens<'a>, CustomErr> {
                         value: &s[i..i + next_quotation]
                     });
                 i += next_quotation + 1;
-                println!()
             },
             '\'' => {
                 // String literal here

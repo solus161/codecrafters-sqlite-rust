@@ -1,3 +1,5 @@
+#[allow(dead_code, unused_imports, unused_variables)]
+
 use anyhow::{Result, bail};
 use crate::btree::BTree;
 use crate::pager::Pager;

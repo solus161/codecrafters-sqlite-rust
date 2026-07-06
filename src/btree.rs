@@ -1,8 +1,6 @@
-use std::collections::{ HashMap, HashSet };
+use std::collections::{ HashMap };
 use std::rc::Rc;
 use std::u64;
-
-use bytes::Bytes;
 
 use crate::parser::select::ValueExpr;
 use crate::parser::{ Ast, ast_from_str };

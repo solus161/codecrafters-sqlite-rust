@@ -5,8 +5,6 @@ use super::{ Build, Eval, EvalOutput };
 
 // Trait for node that can be evaluated into bool
 // WhereCondition or WhereOperator node
-pub trait EvalBool {}
-
 /* Examples of SELECT, we will not implement all
     -- Basic
     SELECT statement could have following forms:
@@ -736,12 +734,35 @@ impl TryFrom<&Token<'_>> for LogicOp {
 // Parenthese
 struct Lparen;
 
-#[derive(Debug, PartialOrd, Clone)]
+#[derive(Debug, Clone)]
 pub enum ValueExpr {
     Text(String),
     Integer(i64),
     Float(f64),
     Null
+}
+
+impl PartialOrd for ValueExpr {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        // Follow SQLite's storage-class sort order: NULL < numeric < text.
+        // The derived order would place Null last (largest), which breaks index
+        // traversal because SQLite stores NULL keys first in the b-tree.
+        fn rank(v: &ValueExpr) -> u8 {
+            match v {
+                ValueExpr::Null => 0,
+                ValueExpr::Integer(_) | ValueExpr::Float(_) => 1,
+                ValueExpr::Text(_) => 2,
+            }
+        }
+        match (self, other) {
+            (ValueExpr::Text(a), ValueExpr::Text(b)) => a.partial_cmp(b),
+            (ValueExpr::Integer(a), ValueExpr::Integer(b)) => a.partial_cmp(b),
+            (ValueExpr::Float(a), ValueExpr::Float(b)) => a.partial_cmp(b),
+            (ValueExpr::Integer(a), ValueExpr::Float(b)) => (*a as f64).partial_cmp(b),
+            (ValueExpr::Float(a), ValueExpr::Integer(b)) => a.partial_cmp(&(*b as f64)),
+            _ => rank(self).partial_cmp(&rank(other)),
+        }
+    }
 }
 
 impl PartialEq for ValueExpr {
