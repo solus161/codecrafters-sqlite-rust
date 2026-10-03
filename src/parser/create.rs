@@ -1,9 +1,8 @@
 use paste;
 
-use crate::exceptions::CustomErr;
-use super::tokenizer::{Token, Tokens};
 use super::Build;
-
+use super::tokenizer::{Token, Tokens};
+use crate::exceptions::CustomErr;
 
 // CREATE TABLE and CREATE INDEX having different structure
 // so they deserve different ASTs
@@ -27,46 +26,50 @@ impl CreateTableStmt {
 
 impl Build for CreateTableStmt {
     fn build(tokens: &mut Tokens) -> Result<Option<Self>, CustomErr> {
-        let mut name: Option<String> = None; 
+        let mut name: Option<String> = None;
         let mut target_tokens: Option<Vec<Token>> = Some(vec![Token::Create { start: 0 }]);
 
-        loop {
-            let Some(_) = tokens.peek(0) else { break };
-            let Some(token) = tokens.current() else { break };
+        while let Some(_) = tokens.peek(0)
+            && let Some(token) = tokens.current()
+        {
+            // let Some(token) = tokens.current() else { break };
             if !token.is_token_type_matched(&target_tokens) {
-                return Err(tokens.get_syntax_error())
+                return Err(tokens.get_syntax_error());
             };
 
             match token {
                 Token::Create { .. } => target_tokens = Some(vec![Token::Table { start: 0 }]),
-                Token::Table { .. } => target_tokens = Some(vec![Token::Ident { start: 0, value: "" }]),
+                Token::Table { .. } => {
+                    target_tokens = Some(vec![Token::Ident {
+                        start: 0,
+                        value: "",
+                    }])
+                }
                 Token::Ident { value, .. } => {
                     name = Some((*value).to_string());
                     target_tokens = Some(vec![Token::Lparen { start: 0 }])
-                },
+                }
                 Token::Lparen { .. } => {
-                    let column_clause = ColumnClause::build(tokens)?
-                        .expect("Never return None");
+                    let column_clause = ColumnClause::build(tokens)?.expect("Never return None");
                     if column_clause.0.is_empty() {
-                        return Err(tokens.get_syntax_error())
+                        return Err(tokens.get_syntax_error());
                     };
 
                     let Some(rparen) = tokens.current() else {
-                        return Err(tokens.get_syntax_error())
+                        return Err(tokens.get_syntax_error());
                     };
 
                     if !matches!(rparen, Token::Rparen { .. }) {
-                        return Err(tokens.get_syntax_error())
+                        return Err(tokens.get_syntax_error());
                     };
-                    return Ok(Some(
-                            Self::new(
-                                name.ok_or(tokens.get_syntax_error())?,
-                                column_clause)
-                            ))
-                },
-                _ => return Err(tokens.get_syntax_error())
+                    return Ok(Some(Self::new(
+                        name.ok_or(tokens.get_syntax_error())?,
+                        column_clause,
+                    )));
+                }
+                _ => return Err(tokens.get_syntax_error()),
             }
-        };
+        }
         Ok(None)
     }
 }
@@ -79,21 +82,24 @@ impl Eq for ColumnClause {}
 
 impl Build for ColumnClause {
     fn build(tokens: &mut Tokens) -> Result<Option<Self>, CustomErr> {
-        let mut target_tokens: Option<Vec<Token>> = Some(vec![Token::Ident { start: 0, value: "" }]);
+        let mut target_tokens: Option<Vec<Token>> = Some(vec![Token::Ident {
+            start: 0,
+            value: "",
+        }]);
         let mut columns: Vec<ColumnAttr> = Vec::new();
 
         loop {
-            let Some(current_token) = tokens.peek(0) else { 
-                return Ok(Some(Self(columns))) 
+            let Some(current_token) = tokens.peek(0) else {
+                return Ok(Some(Self(columns)));
             };
 
             if matches!(current_token, Token::Rparen { .. }) {
-                return Ok(Some(Self(columns)))
+                return Ok(Some(Self(columns)));
             };
 
             let Some(token) = tokens.current() else { break };
             if !token.is_token_type_matched(&target_tokens) {
-                return Err(tokens.get_syntax_error())
+                return Err(tokens.get_syntax_error());
             };
 
             match token {
@@ -108,7 +114,7 @@ impl Build for ColumnClause {
                     // let col_attr = ColumnAttr::new(value.to_string(), col_type);
                     // columns.push(col_attr);
                     columns.push(ColumnAttr::new(value.to_string()));
-                    
+
                     target_tokens = Some(vec![
                         Token::Text { start: 0 },
                         Token::Integer { start: 0 },
@@ -116,72 +122,71 @@ impl Build for ColumnClause {
                         Token::PrimaryKey { start: 0 },
                         Token::AutoIncrement { start: 0 },
                         Token::Not { start: 0 },
-                        Token::Comma { start: 0 }
+                        Token::Comma { start: 0 },
                     ])
-                },
+                }
                 Token::Text { .. } | Token::Integer { .. } | Token::Float { .. } => {
                     let Some(col_top) = columns.last_mut() else {
-                        return Err(tokens.get_syntax_error())
+                        return Err(tokens.get_syntax_error());
                     };
                     col_top.set_type(ColumnType::try_from(token)?);
                     target_tokens = Some(vec![
                         Token::PrimaryKey { start: 0 },
                         Token::AutoIncrement { start: 0 },
                         Token::Not { start: 0 },
-                        Token::Comma { start: 0 }
+                        Token::Comma { start: 0 },
                     ])
-                },
+                }
                 Token::PrimaryKey { .. } => {
                     let Some(col_top) = columns.last_mut() else {
-                        return Err(tokens.get_syntax_error())
+                        return Err(tokens.get_syntax_error());
                     };
 
                     col_top.set_pk(true);
                     target_tokens = Some(vec![
                         Token::AutoIncrement { start: 0 },
                         Token::Not { start: 0 },
-                        Token::Comma { start: 0 }
+                        Token::Comma { start: 0 },
                     ])
-                },
+                }
                 Token::AutoIncrement { .. } => {
                     let Some(col_top) = columns.last_mut() else {
-                        return Err(tokens.get_syntax_error())
+                        return Err(tokens.get_syntax_error());
                     };
 
                     col_top.set_default(DefaultExpr::AutoIncrement);
-                    target_tokens = Some(vec![
-                        Token::Comma { start: 0 }
-                    ])
-                },
+                    target_tokens = Some(vec![Token::Comma { start: 0 }])
+                }
                 Token::Not { .. } => {
                     // NOT must be immediately followed by NULL to form NOT NULL
                     let Some(null_token) = tokens.current() else {
-                        return Err(tokens.get_syntax_error())
+                        return Err(tokens.get_syntax_error());
                     };
                     if !matches!(null_token, Token::Null { .. }) {
-                        return Err(tokens.get_syntax_error())
+                        return Err(tokens.get_syntax_error());
                     };
 
                     let Some(col_top) = columns.last_mut() else {
-                        return Err(tokens.get_syntax_error())
+                        return Err(tokens.get_syntax_error());
                     };
 
                     col_top.set_not_null(true);
                     target_tokens = Some(vec![
                         Token::PrimaryKey { start: 0 },
                         Token::AutoIncrement { start: 0 },
-                        Token::Comma { start: 0 }
-                    ])
-                },
-                Token::Comma { .. } => {
-                    target_tokens = Some(vec![
-                        Token::Ident { start: 0, value: "" }
+                        Token::Comma { start: 0 },
                     ])
                 }
-                _ => return Err(tokens.get_syntax_error())
+                Token::Comma { .. } => {
+                    target_tokens = Some(vec![Token::Ident {
+                        start: 0,
+                        value: "",
+                    }])
+                }
+                _ => return Err(tokens.get_syntax_error()),
             }
-        };
-        
+        }
+
         Ok(Some(Self(columns)))
     }
 }
@@ -199,7 +204,7 @@ pub struct ColumnAttr {
     column_type: Option<ColumnType>,
     pk: bool,
     not_null: bool,
-    default: Option<DefaultExpr>
+    default: Option<DefaultExpr>,
 }
 
 impl Eq for ColumnAttr {}
@@ -207,11 +212,11 @@ impl Eq for ColumnAttr {}
 impl ColumnAttr {
     pub fn new(name: String) -> Self {
         Self {
-            name: name,
+            name,
             column_type: None,
             pk: false,
             not_null: false,
-            default: None
+            default: None,
         }
     }
 
@@ -286,14 +291,18 @@ impl TryFrom<&Token<'_>> for ColumnType {
 pub struct CreateIndexStmt {
     name: String,
     table: String,
-    column: String
+    column: String,
 }
 
 impl Eq for CreateIndexStmt {}
 
 impl CreateIndexStmt {
     pub fn new(name: String, table: String, column: String) -> Self {
-        Self { name, table, column }
+        Self {
+            name,
+            table,
+            column,
+        }
     }
 
     get_attr_str!(name);
@@ -308,23 +317,28 @@ impl Build for CreateIndexStmt {
 
         loop {
             let Some(token) = tokens.current() else {
-                return Err(tokens.get_syntax_error())
+                return Err(tokens.get_syntax_error());
             };
 
             if !token.is_token_type_matched(&target_tokens) {
-                return Err(tokens.get_syntax_error())
+                return Err(tokens.get_syntax_error());
             };
 
             match token {
                 Token::Create { .. } => target_tokens = Some(vec![Token::Index { start: 0 }]),
-                Token::Index { .. } => target_tokens = Some(vec![Token::Ident { start: 0, value: "" }]),
+                Token::Index { .. } => {
+                    target_tokens = Some(vec![Token::Ident {
+                        start: 0,
+                        value: "",
+                    }])
+                }
                 Token::Ident { value, .. } => {
                     builder.with_name(value.to_string());
                     target_tokens = Some(vec![Token::On { start: 0 }]);
-                },
+                }
                 Token::On { .. } => {
                     let Some(table_token) = tokens.current() else {
-                        return Err(tokens.get_syntax_error())
+                        return Err(tokens.get_syntax_error());
                     };
 
                     match table_token {
@@ -333,24 +347,24 @@ impl Build for CreateIndexStmt {
                     };
 
                     let Some(lparen) = tokens.current() else {
-                        return Err(tokens.get_syntax_error())
+                        return Err(tokens.get_syntax_error());
                     };
                     if !matches!(lparen, Token::Lparen { .. }) {
-                        return Err(tokens.get_syntax_error())
+                        return Err(tokens.get_syntax_error());
                     };
 
                     let Some(column_token) = tokens.current() else {
-                        return Err(tokens.get_syntax_error())
+                        return Err(tokens.get_syntax_error());
                     };
                     match column_token {
                         Token::Ident { value, .. } => builder.with_column(value.to_string()),
-                        _ => return Err(tokens.get_syntax_error())
+                        _ => return Err(tokens.get_syntax_error()),
                     };
                     break;
-                },
-                _ => return Err(tokens.get_syntax_error())
+                }
+                _ => return Err(tokens.get_syntax_error()),
             }
-        };
+        }
         Ok(Some(builder.build()?))
     }
 }
@@ -375,7 +389,11 @@ struct CreateIndexStmtBuilder {
 
 impl CreateIndexStmtBuilder {
     pub fn new() -> Self {
-        Self { name: None, table: None, column: None }
+        Self {
+            name: None,
+            table: None,
+            column: None,
+        }
     }
 
     index_builder_attr!(name);
@@ -384,15 +402,21 @@ impl CreateIndexStmtBuilder {
 
     pub fn build(self) -> Result<CreateIndexStmt, CustomErr> {
         let Some(name) = self.name else {
-            return Err(CustomErr::SyntaxError("Index name must be provided".to_string()))
+            return Err(CustomErr::SyntaxError(
+                "Index name must be provided".to_string(),
+            ));
         };
 
         let Some(table) = self.table else {
-            return Err(CustomErr::SyntaxError("Table name must be provided".to_string()))
+            return Err(CustomErr::SyntaxError(
+                "Table name must be provided".to_string(),
+            ));
         };
 
         let Some(column) = self.column else {
-            return Err(CustomErr::SyntaxError("Column name must be provided".to_string()))
+            return Err(CustomErr::SyntaxError(
+                "Column name must be provided".to_string(),
+            ));
         };
 
         Ok(CreateIndexStmt::new(name, table, column))

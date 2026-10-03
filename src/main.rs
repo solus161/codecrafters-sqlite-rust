@@ -1,15 +1,15 @@
-#[allow(dead_code, unused_imports, unused_variables)]
+#![allow(dead_code, unused_imports, unused_variables)]
 
-use anyhow::{Result, bail};
 use crate::btree::BTree;
 use crate::pager::Pager;
+use anyhow::{Result, bail};
 
 #[macro_use]
 mod utils;
-mod exceptions;
-mod parser;
-mod pager;
 mod btree;
+mod exceptions;
+mod pager;
+mod parser;
 mod processor;
 
 use processor::process;
@@ -38,21 +38,27 @@ fn main() -> Result<()> {
             // TODO: Uncomment the code below to pass the first stage
             println!("database page size: {}", btree.pager.page_size());
             println!("number of tables: {}", btree.tables.len());
-        },
+        }
         ".tables" => {
             let mut table_names: Vec<&str> = Vec::new();
             for t in btree.tables.values() {
                 table_names.push(t.name());
-            };
+            }
             table_names.sort();
             let names = table_names.join(" ");
-            println!("{}", &names);
+            println!("{}", names);
+        }
+        // Support extra args for db exploration
+        ".page" => {
+            let page_no = &args[3].parse::<u64>().expect("Page no must be int");
+            let page = btree.parse_page(page_no).expect("Failed parsing page");
+            println!("{:?}", page);
         }
         _ => {
             let output = process(&mut btree, command.as_str());
             match output {
-                Ok(v) => println!("{}", &v),
-                Err(e) => println!("ERR {:?}", &e)
+                Ok(v) => println!("{}", v),
+                Err(e) => println!("ERR {:?}", e),
             }
         }
     }

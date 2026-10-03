@@ -1,11 +1,11 @@
-pub mod tokenizer;
 pub mod create;
 pub mod select;
+pub mod tokenizer;
 
 use crate::{btree::CellPayload, exceptions::CustomErr, parser::tokenizer::tokenize};
-use tokenizer::{ Tokens, Token };
-use create::{ CreateTableStmt, CreateIndexStmt };
+use create::{CreateIndexStmt, CreateTableStmt};
 use select::SelectStmt;
+use tokenizer::{Token, Tokens};
 
 // A general trait for all AST node
 pub trait Build: Sized {
@@ -22,14 +22,14 @@ pub trait Eval {
 // Output of eval
 pub enum EvalOutput {
     Bool(bool),
-    Array,      // This is subquery, leave it for later
+    Array, // This is subquery, leave it for later
 }
 
 impl EvalOutput {
     pub fn is_true(&self) -> bool {
         match self {
             Self::Bool(b) => *b,
-            _ => false
+            _ => false,
         }
     }
 }
@@ -45,35 +45,32 @@ impl Build for Ast {
     fn build(tokens: &mut Tokens) -> Result<Option<Self>, CustomErr> {
         // Check first 2 tokens for type
         let Some(first_token) = tokens.peek(0) else {
-            return Ok(None)
+            return Ok(None);
         };
 
         match first_token {
             Token::Create { .. } => {
                 let Some(second_token) = tokens.peek(1) else {
-                    return Err(tokens.get_syntax_error())
+                    return Err(tokens.get_syntax_error());
                 };
 
                 match second_token {
                     Token::Table { .. } => {
-                        let stmt = CreateTableStmt::build(tokens)?
-                            .ok_or(CustomErr::Internal)?;
+                        let stmt = CreateTableStmt::build(tokens)?.ok_or(CustomErr::Internal)?;
                         Ok(Some(Self::CreateTable(stmt)))
-                    },
+                    }
                     Token::Index { .. } => {
-                        let stmt = CreateIndexStmt::build(tokens)?
-                            .ok_or(CustomErr::Internal)?;
+                        let stmt = CreateIndexStmt::build(tokens)?.ok_or(CustomErr::Internal)?;
                         Ok(Some(Self::CreateIndex(stmt)))
-                    },
-                    _ => return Err(tokens.get_syntax_error())
+                    }
+                    _ => Err(tokens.get_syntax_error()),
                 }
-            },
+            }
             Token::Select { .. } => {
-                let stmt = SelectStmt::build(tokens)?
-                    .ok_or(CustomErr::Internal)?;
+                let stmt = SelectStmt::build(tokens)?.ok_or(CustomErr::Internal)?;
                 Ok(Some(Self::Select(stmt)))
-            },
-            _ => return Err(tokens.get_syntax_error())
+            }
+            _ => Err(tokens.get_syntax_error()),
         }
     }
 }

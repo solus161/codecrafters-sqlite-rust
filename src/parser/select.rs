@@ -1,57 +1,57 @@
+use super::tokenizer::{Token, Tokens, tokenize};
+use super::{Build, Eval, EvalOutput};
+use crate::btree::{BTree, CellColValue, CellPayload, Table};
 use crate::exceptions::CustomErr;
-use crate::btree::{ BTree, CellColValue, CellPayload, Table };
-use super::tokenizer::{ Token, Tokens, tokenize };
-use super::{ Build, Eval, EvalOutput };
 
 // Trait for node that can be evaluated into bool
 // WhereCondition or WhereOperator node
 /* Examples of SELECT, we will not implement all
-    -- Basic
-    SELECT statement could have following forms:
-    SELECT name FROM countries
-    SELECT name, gdp FROM countries
-    SELECT name, gdp, population FROM countries
-    SELECT *, name FROM countries
+   -- Basic
+   SELECT statement could have following forms:
+   SELECT name FROM countries
+   SELECT name, gdp FROM countries
+   SELECT name, gdp, population FROM countries
+   SELECT *, name FROM countries
 
-    -- Column expression, we stop here, but the data must have places for advanced cases
-    SELECT COUNT(*) FROM countries
-    SELECT COUNT(*) AS total FROM countries
-    SELECT MAX(gdp), MIN(gdp) FROM countries
-    SELECT UPPER(name) FROM countries
+   -- Column expression, we stop here, but the data must have places for advanced cases
+   SELECT COUNT(*) FROM countries
+   SELECT COUNT(*) AS total FROM countries
+   SELECT MAX(gdp), MIN(gdp) FROM countries
+   SELECT UPPER(name) FROM countries
 
-    -- Advanced column expresstion
-    SELECT price * quantity FROM orders
-    SELECT price * quantity AS total FROM orders
-    SELECT gdp / population AS gdp_per_capita FROM countries
-    SELECT 1 + 1 FROM countries          -- valid, constant expression repeated per row
-    
-    -- Join SELECT * FROM countries, cities                          -- implicit cross join
-    SELECT * FROM countries JOIN cities ON countries.id = cities.country_id
-    SELECT * FROM countries INNER JOIN cities ON ...
-    SELECT * FROM countries LEFT JOIN cities ON ...
-    SELECT * FROM countries AS c JOIN cities AS ci ON c.id = ci.country_id
+   -- Advanced column expresstion
+   SELECT price * quantity FROM orders
+   SELECT price * quantity AS total FROM orders
+   SELECT gdp / population AS gdp_per_capita FROM countries
+   SELECT 1 + 1 FROM countries          -- valid, constant expression repeated per row
 
-    -- Subquery
-    SELECT * FROM (SELECT name, gdp FROM countries WHERE gdp > 1000) AS rich_countries
- */
+   -- Join SELECT * FROM countries, cities                          -- implicit cross join
+   SELECT * FROM countries JOIN cities ON countries.id = cities.country_id
+   SELECT * FROM countries INNER JOIN cities ON ...
+   SELECT * FROM countries LEFT JOIN cities ON ...
+   SELECT * FROM countries AS c JOIN cities AS ci ON c.id = ci.country_id
+
+   -- Subquery
+   SELECT * FROM (SELECT name, gdp FROM countries WHERE gdp > 1000) AS rich_countries
+*/
 
 // Select statement, consiste of 3 clauses
 #[derive(Debug, PartialEq)]
 pub struct SelectStmt {
     pub select_clause: SelectClause,
     pub from_clause: FromClause,
-    pub where_clause: Option<WhereClause> 
+    pub where_clause: Option<WhereClause>,
 }
 
 impl Build for SelectStmt {
     fn build(tokens: &mut Tokens) -> Result<Option<Self>, CustomErr> {
-        let select_clause = SelectClause::build(tokens)?;  
+        let select_clause = SelectClause::build(tokens)?;
         let from_clause = FromClause::build(tokens)?;
         let where_clause = WhereClause::build(tokens)?;
         Ok(Some(Self {
             select_clause: select_clause.expect("Select clause must not be None"),
             from_clause: from_clause.expect("From clause mut not be None"),
-            where_clause
+            where_clause,
         }))
     }
 }
@@ -59,7 +59,7 @@ impl Build for SelectStmt {
 impl SelectStmt {
     pub fn eval_where(&self, row: &CellPayload) -> Result<bool, CustomErr> {
         let Some(where_clause) = &self.where_clause else {
-            return Ok(true)
+            return Ok(true);
         };
         let eval_output = where_clause.eval(row)?;
         Ok(eval_output.is_true())
@@ -69,7 +69,7 @@ impl SelectStmt {
         // Resolve column name in where to index in payload
         match &mut self.where_clause {
             Some(where_clause) => where_clause.resolve(table),
-            None => Ok(())
+            None => Ok(()),
         }
     }
 
@@ -80,7 +80,7 @@ impl SelectStmt {
         // or is A AND B with either A or B is a condition
         let Some(where_clause) = &self.where_clause else {
             // return None
-            return None
+            return None;
         };
         where_clause.resolve_index()
     }
@@ -93,67 +93,68 @@ pub struct SelectClause(Vec<ColumnExpr>);
 impl Eq for SelectClause {}
 
 impl Build for SelectClause {
-    fn build(tokens: &mut Tokens) -> Result<Option<Self>, CustomErr>
-    {
+    fn build(tokens: &mut Tokens) -> Result<Option<Self>, CustomErr> {
         if tokens.is_empty() {
-            return Err(CustomErr::SyntaxError("Nothing provided".to_string()))
+            return Err(CustomErr::SyntaxError("Nothing provided".to_string()));
         };
 
         let mut columns: Vec<ColumnExpr> = Vec::new();
-        let mut target_tokens: Option<Vec<Token>> = Some(vec![Token::Select{ start: 0 }]);
+        let mut target_tokens: Option<Vec<Token>> = Some(vec![Token::Select { start: 0 }]);
 
         // let mut tokens_iter = tokens.iter().enumerate();
 
-        loop {
+        while let Some(current_token) = tokens.peek(0)
+            && !matches!(current_token, Token::From { .. })
+        {
             // If current token is From, break do not consume
-            let Some(current_token) = tokens.peek(0) else {
-                break
-            };
-            if matches!(current_token, Token::From { .. }) {
-                break
-            };
+            // let Some(current_token) = tokens.peek(0) else {
+            //     break
+            // };
+            // if matches!(current_token, Token::From { .. }) {
+            //     break
+            // };
 
             let Some(token) = tokens.current() else { break };
             if !token.is_token_type_matched(&target_tokens) {
-                return Err(tokens.get_syntax_error()) 
+                return Err(tokens.get_syntax_error());
             };
 
             match token {
                 Token::Select { .. } => {
                     target_tokens = Some(vec![
-                        Token::Ident{ start: 0, value: "" },
-                        Token::Count{ start: 0},
-                        Token::Asterik { start: 0 }
+                        Token::Ident {
+                            start: 0,
+                            value: "",
+                        },
+                        Token::Count { start: 0 },
+                        Token::Asterik { start: 0 },
                     ])
-                },
-                Token::Ident { value, .. }=> {
-                    columns.push(ColumnExpr::Name{
+                }
+                Token::Ident { value, .. } => {
+                    columns.push(ColumnExpr::Name {
                         name: value.to_string(),
                         index: None,
-                        });
-                    target_tokens = Some(vec![
-                        Token::Comma { start: 0 },
-                        Token::From { start: 0 }
-                    ]);
-                },
+                    });
+                    target_tokens = Some(vec![Token::Comma { start: 0 }, Token::From { start: 0 }]);
+                }
                 Token::Count { .. } => {
                     // Extract following token right here
                     // LPAREN
                     let Some(lparen) = tokens.current() else {
-                        return Err(tokens.get_syntax_error())
+                        return Err(tokens.get_syntax_error());
                     };
 
                     if !matches!(lparen, Token::Lparen { .. }) {
-                        return Err(tokens.get_syntax_error())
+                        return Err(tokens.get_syntax_error());
                     };
 
                     // Ident or asterik
                     let Some(ident) = tokens.current() else {
-                        return Err(tokens.get_syntax_error())
+                        return Err(tokens.get_syntax_error());
                     };
-                    
+
                     let column_expr = match ident {
-                        Token::Ident { value, .. } => ColumnExpr::Name{
+                        Token::Ident { value, .. } => ColumnExpr::Name {
                             name: value.to_string(),
                             index: None,
                         },
@@ -163,34 +164,31 @@ impl Build for SelectClause {
 
                     // RPAREN
                     let Some(rparen) = tokens.current() else {
-                        return Err(tokens.get_syntax_error())
+                        return Err(tokens.get_syntax_error());
                     };
 
                     if !matches!(rparen, Token::Rparen { .. }) {
-                        return Err(tokens.get_syntax_error())
+                        return Err(tokens.get_syntax_error());
                     };
 
-                    target_tokens = Some(vec![
-                        Token::Comma { start: 0 }, 
-                        Token::From { start: 0 }
-                    ]);
+                    target_tokens = Some(vec![Token::Comma { start: 0 }, Token::From { start: 0 }]);
                     columns.push(ColumnExpr::Count(Box::new(column_expr)));
-                },
+                }
                 Token::Asterik { .. } => {
+                    target_tokens = Some(vec![Token::Comma { start: 0 }, Token::From { start: 0 }]);
+                }
+                Token::Comma { .. } => {
                     target_tokens = Some(vec![
-                        Token::Comma { start: 0 }, 
-                        Token::From { start: 0 }
+                        Token::Ident {
+                            start: 0,
+                            value: "",
+                        },
+                        Token::Count { start: 0 },
                     ]);
-                },
-                Token::Comma{ .. } => {
-                    target_tokens = Some(vec![
-                        Token::Ident { start: 0, value: "" },
-                        Token::Count { start: 0 }
-                    ]);
-                },
-                _ => return Err(tokens.get_syntax_error())
+                }
+                _ => return Err(tokens.get_syntax_error()),
             }
-        };
+        }
 
         Ok(Some(Self(columns)))
     }
@@ -206,22 +204,20 @@ impl SelectClause {
 // Used in Select stmt
 #[derive(Debug, PartialEq)]
 pub enum ColumnExpr {
-    Name{ name: String, index: Option<u64> },
+    Name { name: String, index: Option<u64> },
     Count(Box<ColumnExpr>),
-    All
+    All,
 }
 
 impl Eq for ColumnExpr {}
 
 impl ColumnExpr {
     pub fn resolve(&mut self, table: &Table) -> Result<(), CustomErr> {
-        match self {
-            Self::Name { name, index } => {
-                let col_index = table.column_index(name.as_str())
-                    .ok_or(CustomErr::Execution("Invalid column name".to_string()))?;
-                *index = Some(*col_index);
-            },
-            _ => {}
+        if let Self::Name { name, index } = self {
+            let col_index = table
+                .column_index(name.as_str())
+                .ok_or(CustomErr::Execution("Invalid column name".to_string()))?;
+            *index = Some(*col_index);
         };
         Ok(())
     }
@@ -229,14 +225,14 @@ impl ColumnExpr {
     pub fn index(&self) -> Option<u64> {
         match self {
             Self::Name { index, .. } => *index,
-            _ => None
+            _ => None,
         }
     }
 
     pub fn get_column(&self) -> Option<&str> {
         match self {
             Self::Name { name, .. } => Some(name.as_str()),
-            _ => None
+            _ => None,
         }
     }
 }
@@ -256,7 +252,7 @@ impl FromClause {
 impl Build for FromClause {
     fn build(tokens: &mut Tokens) -> Result<Option<Self>, CustomErr> {
         if tokens.is_empty() {
-            return Err(CustomErr::SyntaxError("Nothing provided".to_string()))
+            return Err(CustomErr::SyntaxError("Nothing provided".to_string()));
         };
 
         let mut target_tokens: Option<Vec<Token>> = Some(vec![Token::From { start: 0 }]);
@@ -264,30 +260,35 @@ impl Build for FromClause {
 
         loop {
             let Some(token) = tokens.current() else {
-                return Err(tokens.get_syntax_error())
+                return Err(tokens.get_syntax_error());
             };
 
             if !token.is_token_type_matched(&target_tokens) {
-                return Err(tokens.get_syntax_error()) 
+                return Err(tokens.get_syntax_error());
             };
             match token {
-                Token::From { .. } => target_tokens = Some(vec![Token::Ident { start: 0, value: "" }]),
+                Token::From { .. } => {
+                    target_tokens = Some(vec![Token::Ident {
+                        start: 0,
+                        value: "",
+                    }])
+                }
                 Token::Ident { value: name, .. } => {
                     table_expr = Some(TableExpr::Name(name.to_string()));
                     break;
-                },
-                _ => return Err(tokens.get_syntax_error())
+                }
+                _ => return Err(tokens.get_syntax_error()),
             }
-        };
+        }
 
         // If the current token is EoF, must consume that
-        if let Some(eof) = tokens.peek(0) {
-            if matches!(eof, Token::EoF { .. }) {
-                let _eof = tokens.current();
-            };
+        if let Some(eof) = tokens.peek(0)
+            && matches!(eof, Token::EoF { .. })
+        {
+            let _eof = tokens.current();
         };
 
-        Ok(Some(FromClause(table_expr.expect("Must not be None")))) 
+        Ok(Some(FromClause(table_expr.expect("Must not be None"))))
     }
 }
 
@@ -344,24 +345,24 @@ impl Eq for WhereClause {}
 impl Build for WhereClause {
     fn build(tokens: &mut Tokens) -> Result<Option<Self>, CustomErr> {
         if tokens.is_empty() {
-            return Err(CustomErr::SyntaxError("Nothing provided".to_string()))
+            return Err(CustomErr::SyntaxError("Nothing provided".to_string()));
         };
 
         let Some(current_token) = tokens.peek(0) else {
-            return Ok(None)
+            return Ok(None);
         };
 
         if !matches!(current_token, Token::Where { .. }) {
-            return Err(tokens.get_syntax_error())
+            return Err(tokens.get_syntax_error());
         };
 
         // Move next
         let Some(_token) = tokens.current() else {
-            return Err(tokens.get_syntax_error())
+            return Err(tokens.get_syntax_error());
         };
 
         let Some(expr) = WhereExpr::build(tokens)? else {
-            return Err(tokens.get_syntax_error())
+            return Err(tokens.get_syntax_error());
         };
 
         Ok(Some(Self(expr)))
@@ -398,31 +399,25 @@ impl WhereExpr {
         // Add index based on column name
         // return column name used, help with walking later
         match self {
-            Self::Condition(cond) => {
-                cond.resolve(table)
-            },
-            Self::Operator(box_op) => {
-                box_op.resolve(table)
-            }
+            Self::Condition(cond) => cond.resolve(table),
+            Self::Operator(box_op) => box_op.resolve(table),
         }
     }
 
     pub fn resolve_index(&self) -> Option<IndexCondition> {
         match self {
             Self::Condition(cond) => IndexCondition::from_where_cond(cond),
-            Self::Operator(box_op) => {
-                match box_op.op {
-                    LogicOp::And => {
-                        let c1 = box_op.left.resolve_index();
-                        if c1.is_none() {
-                            box_op.right.resolve_index()
-                        } else {
-                            c1
-                        }
-                    },
-                    _ => None
+            Self::Operator(box_op) => match box_op.op {
+                LogicOp::And => {
+                    let c1 = box_op.left.resolve_index();
+                    if c1.is_none() {
+                        box_op.right.resolve_index()
+                    } else {
+                        c1
+                    }
                 }
-            }
+                _ => None,
+            },
         }
     }
 }
@@ -431,62 +426,69 @@ impl Build for WhereExpr {
     fn build(tokens: &mut Tokens) -> Result<Option<Self>, CustomErr> {
         // This could be build recursively due to ( )
         if tokens.is_empty() {
-            return Err(CustomErr::SyntaxError("Nothing provided".to_string()))
+            return Err(CustomErr::SyntaxError("Nothing provided".to_string()));
         };
-        
+
         // WHERE is detected by parent stack frame
         // After WHERE, accept only Ident and ()
         let mut target_tokens: Option<Vec<Token>> = Some(vec![
-            Token::Ident { start: 0, value: "" },
-            Token::Lparen { start: 0 }
+            Token::Ident {
+                start: 0,
+                value: "",
+            },
+            Token::Lparen { start: 0 },
         ]);
         // let mut tokens_iter = tokens.iter().enumerate();
 
         let mut expr_stack: Vec<WhereExpr> = Vec::new();
         let mut op_stack: Vec<LogicOp> = Vec::new();
-        loop {
+        while let Some(current_token) = tokens.peek(0)
+            && !matches!(current_token, Token::Rparen { .. } | Token::EoF { .. })
+        {
             // Before move to next token, must peek to current to identify )
             // as WhereExpr could be nested
-            let Some(current_token) = tokens.peek(0) else {
-                // Nothing next
-                break 
-            };
-
-            if matches!(current_token, Token::Rparen { .. } | Token::EoF { .. }) {
-                // Next token is ) or end-of-statement (;), stop without consuming
-                break
-            };
+            // let Some(current_token) = tokens.peek(0) else {
+            //     // Nothing next
+            //     break
+            // };
+            //
+            // if matches!(current_token, Token::Rparen { .. } | Token::EoF { .. }) {
+            //     // Next token is ) or end-of-statement (;), stop without consuming
+            //     break
+            // };
 
             // Current token is not ), could move next
             let Some(token) = tokens.current() else { break };
             if !token.is_token_type_matched(&target_tokens) {
-                return Err(tokens.get_syntax_error()) 
+                return Err(tokens.get_syntax_error());
             };
 
             match token {
                 Token::Ident { value: name, .. } => {
                     // Check next 2 tokens must be opeator and operand
                     let Some(op) = tokens.current() else {
-                        return Err(tokens.get_syntax_error())
+                        return Err(tokens.get_syntax_error());
                     };
 
-                    
                     let Some(operand) = tokens.current() else {
-                        return Err(tokens.get_syntax_error())
+                        return Err(tokens.get_syntax_error());
                     };
-                    
+
                     let op = CompSpecOp::try_from(op)?;
                     let value: ValueExpr = match operand {
                         Token::StrLiteral { value, .. } => ValueExpr::Text((*value).to_string()),
                         Token::IntLiteral { value, .. } => ValueExpr::Integer(*value),
                         Token::FloatLiteral { value, .. } => ValueExpr::Float(*value),
-                        _ => return Err(tokens.get_syntax_error())
+                        _ => return Err(tokens.get_syntax_error()),
                     };
 
-                    let cond = WhereCondition{
-                        column_expr: ColumnExpr::Name{ name: name.to_string(), index: None },
-                        op: op,
-                        target: value
+                    let cond = WhereCondition {
+                        column_expr: ColumnExpr::Name {
+                            name: name.to_string(),
+                            index: None,
+                        },
+                        op,
+                        target: value,
                     };
 
                     if expr_stack.is_empty() && op_stack.is_empty() {
@@ -494,15 +496,17 @@ impl Build for WhereExpr {
                     } else if !expr_stack.is_empty() && !op_stack.is_empty() {
                         // We got a node here, form new node only if top op is AND
                         let Some(top_op) = op_stack.last() else {
-                            return Err(CustomErr::BuildAST("Op stack mut not be empty".to_string())) 
+                            return Err(CustomErr::BuildAST(
+                                "Op stack mut not be empty".to_string(),
+                            ));
                         };
                         if matches!(top_op, LogicOp::And) {
                             let node_left = expr_stack.pop().expect("Expr stack must not be empty");
                             let op = op_stack.pop().expect("Op stack must not be empty");
-                            let node = WhereOperator{
+                            let node = WhereOperator {
                                 left: node_left,
-                                op: op,
-                                right: WhereExpr::Condition(cond)
+                                op,
+                                right: WhereExpr::Condition(cond),
                             };
                             expr_stack.push(WhereExpr::Operator(Box::new(node)));
                         } else {
@@ -512,40 +516,43 @@ impl Build for WhereExpr {
                         }
                     } else {
                         // A cond cannot follow a cond/expr
-                        return Err(tokens.get_syntax_error())
+                        return Err(tokens.get_syntax_error());
                     };
                     target_tokens = None;
-                },
+                }
                 Token::And { .. } | Token::Or { .. } => {
                     if expr_stack.is_empty() {
                         // AND/OR must follow a cond or and expr
-                        return Err(tokens.get_syntax_error())
+                        return Err(tokens.get_syntax_error());
                     };
 
                     let op = LogicOp::try_from(token)?;
                     op_stack.push(op);
                     target_tokens = Some(vec![
                         Token::Lparen { start: 0 },
-                        Token::Ident { start: 0, value: "" }
+                        Token::Ident {
+                            start: 0,
+                            value: "",
+                        },
                     ])
-                },
+                }
                 Token::Lparen { .. } => {
                     // Recursively here
                     let Some(expr) = WhereExpr::build(tokens)? else {
-                        return Err(tokens.get_syntax_error())
+                        return Err(tokens.get_syntax_error());
                     };
-                    
+
                     // Current token must be ), that's what terminates the expr
                     let Some(rparen) = tokens.current() else {
                         // Lparen does not having matched Rparen
-                        return Err(tokens.get_syntax_error())
+                        return Err(tokens.get_syntax_error());
                     };
 
                     if !matches!(rparen, Token::Rparen { .. }) {
                         // St terminates the expr
-                        return Err(tokens.get_syntax_error())
+                        return Err(tokens.get_syntax_error());
                     };
-                    
+
                     // Ok got the expr
                     if expr_stack.is_empty() && op_stack.is_empty() {
                         expr_stack.push(expr);
@@ -556,10 +563,10 @@ impl Build for WhereExpr {
                         if matches!(top_op, LogicOp::And) {
                             let node_left = expr_stack.pop().expect("Expr stack must not be empty");
                             let op = op_stack.pop().expect("Op stack must not be empty");
-                            let node = WhereOperator{
+                            let node = WhereOperator {
                                 left: node_left,
-                                op: op,
-                                right: expr
+                                op,
+                                right: expr,
                             };
                             expr_stack.push(WhereExpr::Operator(Box::new(node)));
                         } else {
@@ -569,14 +576,14 @@ impl Build for WhereExpr {
                         }
                     } else {
                         // A cond/expr cannot follow a cond/expr
-                        return Err(tokens.get_syntax_error())
+                        return Err(tokens.get_syntax_error());
                     };
                     target_tokens = None;
-                },
-                _ => return Err(tokens.get_syntax_error())
+                }
+                _ => return Err(tokens.get_syntax_error()),
             }
-        };
-        
+        }
+
         // Ok, now the expr_stack need to be resolve
         // println!("Expr stack {:?}", &expr_stack);
         // println!("Op stack {:?}", &op_stack);
@@ -585,14 +592,14 @@ impl Build for WhereExpr {
             let node_right = expr_stack.pop().expect("Node right not found");
             let op = op_stack.pop().expect("Op not found");
             let node_left = expr_stack.pop().expect("Node left not found");
-            let node = WhereOperator{
+            let node = WhereOperator {
                 left: node_left,
-                op: op,
-                right: node_right
+                op,
+                right: node_right,
             };
             let expr = WhereExpr::Operator(Box::new(node));
             expr_stack.push(expr);
-        };
+        }
         Ok(Some(expr_stack.pop().expect("Expr stack mut not be empty")))
     }
 }
@@ -600,12 +607,8 @@ impl Build for WhereExpr {
 impl Eval for WhereExpr {
     fn eval(&self, row: &CellPayload) -> Result<EvalOutput, CustomErr> {
         let eval_output = match self {
-            Self::Condition(cond) => {
-                cond.eval(row)?
-            },
-            Self::Operator(box_op) => {
-                box_op.eval(row)?
-            }
+            Self::Condition(cond) => cond.eval(row)?,
+            Self::Operator(box_op) => box_op.eval(row)?,
         };
         Ok(EvalOutput::Bool(eval_output.is_true()))
     }
@@ -629,14 +632,14 @@ impl Eval for WhereOperator {
             LogicOp::And => left_bool.is_true() && right_bool.is_true(),
             LogicOp::Or => left_bool.is_true() | right_bool.is_true(),
         };
-        Ok(EvalOutput::Bool(output_bool))        
+        Ok(EvalOutput::Bool(output_bool))
     }
 }
 
 impl WhereOperator {
     pub fn resolve(&mut self, table: &Table) -> Result<(), CustomErr> {
-        let _ = self.left.resolve(table)?;
-        let _ = self.right.resolve(table)?;
+        self.left.resolve(table)?;
+        self.right.resolve(table)?;
         Ok(())
     }
 }
@@ -646,7 +649,7 @@ impl WhereOperator {
 pub struct WhereCondition {
     column_expr: ColumnExpr,
     op: CompSpecOp,
-    target: ValueExpr
+    target: ValueExpr,
 }
 
 impl WhereCondition {
@@ -661,12 +664,13 @@ impl WhereCondition {
 
 impl Eval for WhereCondition {
     fn eval(&self, row: &CellPayload) -> Result<EvalOutput, CustomErr> {
-        let index = self.column_expr.index()
+        let index = self
+            .column_expr
+            .index()
             .ok_or(CustomErr::Execution("Invalid column index".to_string()))?;
-        let value_expr = ValueExpr::try_from(row.column(index as usize)
-            .ok_or(CustomErr::Execution(
-                    format!("Column index {} not found", &index)
-            ))?)?;
+        let value_expr = ValueExpr::try_from(row.column(index as usize).ok_or(
+            CustomErr::Execution(format!("Column index {} not found", index)),
+        )?)?;
 
         let bool_value = match self.op {
             CompSpecOp::Eq => value_expr == self.target,
@@ -674,7 +678,7 @@ impl Eval for WhereCondition {
             CompSpecOp::Gt => value_expr > self.target,
             CompSpecOp::Lt => value_expr < self.target,
             CompSpecOp::Ge => value_expr >= self.target,
-            CompSpecOp::Le => value_expr <= self.target
+            CompSpecOp::Le => value_expr <= self.target,
         };
 
         Ok(EvalOutput::Bool(bool_value))
@@ -700,13 +704,13 @@ impl TryFrom<&Token<'_>> for CompSpecOp {
     fn try_from(value: &Token) -> Result<Self, Self::Error> {
         match value {
             Token::Eq { .. } => Ok(Self::Eq),
-            Token::Ne { .. }=> Ok(Self::Ne),
+            Token::Ne { .. } => Ok(Self::Ne),
             Token::Gt { .. } => Ok(Self::Gt),
             Token::Lt { .. } => Ok(Self::Lt),
             Token::Ge { .. } => Ok(Self::Ge),
             Token::Le { .. } => Ok(Self::Le),
-            _ => Err(CustomErr::SyntaxError("Unsupported operator".to_string()))
-        } 
+            _ => Err(CustomErr::SyntaxError("Unsupported operator".to_string())),
+        }
     }
 }
 
@@ -714,7 +718,7 @@ impl TryFrom<&Token<'_>> for CompSpecOp {
 #[derive(Debug, PartialEq, Clone)]
 pub enum LogicOp {
     And,
-    Or
+    Or,
 }
 
 impl Eq for LogicOp {}
@@ -726,7 +730,7 @@ impl TryFrom<&Token<'_>> for LogicOp {
         match value {
             Token::And { .. } => Ok(Self::And),
             Token::Or { .. } => Ok(Self::Or),
-            _ => Err(CustomErr::SyntaxError("Unsupported operator".to_string()))
+            _ => Err(CustomErr::SyntaxError("Unsupported operator".to_string())),
         }
     }
 }
@@ -739,7 +743,7 @@ pub enum ValueExpr {
     Text(String),
     Integer(i64),
     Float(f64),
-    Null
+    Null,
 }
 
 impl PartialOrd for ValueExpr {
@@ -773,8 +777,8 @@ impl PartialEq for ValueExpr {
             (Self::Float(a), Self::Float(b)) => a.to_bits() == b.to_bits(),
             (Self::Null, _) => false,
             (_, Self::Null) => false,
-            _ => false
-        } 
+            _ => false,
+        }
     }
 }
 
@@ -786,12 +790,16 @@ impl TryFrom<&CellColValue> for ValueExpr {
             CellColValue::Int8(x) => Self::Integer(*x as i64),
             CellColValue::Int16(x) => Self::Integer(*x as i64),
             CellColValue::Int24(x) => Self::Integer(*x as i64),
-            CellColValue::Int48(x) => Self::Integer(*x as i64),
-            CellColValue::Int64(x) => Self::Integer(*x as i64),
-            CellColValue::Float64(x) => Self::Float(*x as f64),
+            CellColValue::Int48(x) => Self::Integer(*x),
+            CellColValue::Int64(x) => Self::Integer(*x),
+            CellColValue::Float64(x) => Self::Float(*x),
             CellColValue::Text(s) => Self::Text(s.to_string()),
             CellColValue::Null => Self::Null,
-            _ => return Err(CustomErr::Execution("Cannot be evaluated to scalar".to_string()))
+            _ => {
+                return Err(CustomErr::Execution(
+                    "Cannot be evaluated to scalar".to_string(),
+                ));
+            }
         };
         Ok(value_expr)
     }
@@ -800,7 +808,7 @@ impl TryFrom<&CellColValue> for ValueExpr {
 pub struct IndexCondition {
     column: String,
     op: CompSpecOp,
-    target: ValueExpr
+    target: ValueExpr,
 }
 
 impl IndexCondition {
@@ -815,35 +823,33 @@ impl IndexCondition {
     }
 
     pub fn from_where_cond(value: &WhereCondition) -> Option<Self> {
+        // An index cannot restrict !=: everything outside a single run matches, so
+        // walking the index would visit the whole tree to skip one run. Returning
+        // None here lets the planner fall back to a full table scan.
+        if matches!(value.op, CompSpecOp::Ne) {
+            return None;
+        };
+
         match &value.column_expr {
             ColumnExpr::Name { name, .. } => {
                 // Only accept a single column not column expr
                 Some(Self {
                     column: name.to_string(),
                     op: value.op.clone(),
-                    target: value.target.clone() })
-
-                // let clone_op = match value.op {
-                //     CompSpecOp::Eq => CompSpecOp::Ge, // I <= T < I + 1, stop if T > I, T within [I, I+1)
-                //     CompSpecOp::Ne => return None, // Walk the full table
-                //     _ => value.op.clone(),
-                // };
-                // Some(Self {
-                //     column: name.to_string(),
-                //     op: clone_op,
-                //     target: value.target.clone() })
-            },
-            _ => None
+                    target: value.target.clone(),
+                })
+            }
+            _ => None,
         }
     }
 }
 
 impl Eval for IndexCondition {
     fn eval(&self, row: &CellPayload) -> Result<EvalOutput, CustomErr> {
-        // Row is feeded in increasing key order 
-        let node_col = row.column(0).ok_or(
-            CustomErr::Execution("Index cell has no index value".to_string())
-        )?;  // index value is at index 0 of payload
+        // Row is feeded in increasing key order
+        let node_col = row.column(0).ok_or(CustomErr::Execution(
+            "Index cell has no index value".to_string(),
+        ))?; // index value is at index 0 of payload
 
         let value_expr = ValueExpr::try_from(node_col)?;
 
@@ -853,7 +859,7 @@ impl Eval for IndexCondition {
             CompSpecOp::Gt => value_expr > self.target,
             CompSpecOp::Lt => value_expr < self.target,
             CompSpecOp::Ge => value_expr >= self.target,
-            CompSpecOp::Le => value_expr <= self.target
+            CompSpecOp::Le => value_expr <= self.target,
         };
 
         Ok(EvalOutput::Bool(bool_value))
@@ -868,29 +874,33 @@ impl Eval for IndexCondition {
 //     }
 // }
 
-
 // Testing
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[test] fn test_build_select() {
+    #[test]
+    fn test_build_select() {
         let s = " select name, \"company size\", count(*), count(\"more name\"), count ( age ) ";
-        let target = SelectClause(
-            vec![
-                ColumnExpr::Name{ name: "name".to_string(), index: None },
-                ColumnExpr::Name{ name: "company size".to_string(), index: None},
-                ColumnExpr::Count(Box::new(ColumnExpr::All)),
-                ColumnExpr::Count(Box::new(ColumnExpr::Name{
-                    name: "more name".to_string(),
-                    index: None,
-                })),
-                ColumnExpr::Count(Box::new(ColumnExpr::Name{
-                    name: "age".to_string(),
-                    index: None,
-                }))
-            ]
-        );
+        let target = SelectClause(vec![
+            ColumnExpr::Name {
+                name: "name".to_string(),
+                index: None,
+            },
+            ColumnExpr::Name {
+                name: "company size".to_string(),
+                index: None,
+            },
+            ColumnExpr::Count(Box::new(ColumnExpr::All)),
+            ColumnExpr::Count(Box::new(ColumnExpr::Name {
+                name: "more name".to_string(),
+                index: None,
+            })),
+            ColumnExpr::Count(Box::new(ColumnExpr::Name {
+                name: "age".to_string(),
+                index: None,
+            })),
+        ]);
 
         let mut tokens = tokenize(&s).unwrap();
         let select_clause = SelectClause::build(&mut tokens);

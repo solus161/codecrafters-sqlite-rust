@@ -1,6 +1,6 @@
 use std::array::TryFromSliceError;
-use std::num::{ParseIntError, ParseFloatError};
 use std::io;
+use std::num::{ParseFloatError, ParseIntError};
 use std::string::FromUtf8Error;
 
 #[derive(Debug)]
@@ -16,10 +16,9 @@ pub enum CustomErr {
     Execution(String),
 }
 
-
 impl From<ParseIntError> for CustomErr {
     fn from(_value: ParseIntError) -> Self {
-        CustomErr::ParseNumb 
+        CustomErr::ParseNumb
     }
 }
 
